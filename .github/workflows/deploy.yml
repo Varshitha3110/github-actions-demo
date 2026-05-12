@@ -1,37 +1,57 @@
 name: Deploy Application
 
 on:
- push:
-   branches:
-     - main
+  push:
+    branches:
+      - main
 
 jobs:
- deploy:
-   runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-   steps:
-     - name: Checkout Repository
-       uses: actions/checkout@v4
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-     - name: Configure AWS Credentials
-       uses: aws-actions/configure-aws-credentials@v4
-       with:
-         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-         aws-region: ${{ secrets.AWS_REGION }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-     - name: Login to Amazon ECR
-       id: login-ecr
-       uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-     - name: Build Docker Image
-       run: |
-         docker build -t github-actions-demo .
+      - name: Build Docker Image
+        run: |
+          docker build -t github-actions-demo .
 
-     - name: Tag Docker Image
-       run: |
-         docker tag github-actions-demo:latest ${{ secrets.ECR_REPOSITORY }}:latest
+      - name: Tag Docker Image
+        run: |
+          docker tag github-actions-demo:latest ${{ secrets.ECR_REPOSITORY }}:latest
 
-     - name: Push Docker Image
-       run: |
-         docker push ${{ secrets.ECR_REPOSITORY }}:latest
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.ECR_REPOSITORY }}:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker stop github-actions-demo || true
+            docker rm github-actions-demo || true
+
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+            | docker login --username AWS --password-stdin $(echo ${{ secrets.ECR_REPOSITORY }} | cut -d'/' -f1)
+
+            docker pull ${{ secrets.ECR_REPOSITORY }}:latest
+
+            docker run -d \
+              --name github-actions-demo \
+              -p 3000:3000 \
+              ${{ secrets.ECR_REPOSITORY }}:latest
